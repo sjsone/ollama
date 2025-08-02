@@ -36,10 +36,12 @@ type LlmRequest struct {
 }
 
 type Scheduler struct {
-	pendingReqCh  chan *LlmRequest
-	finishedReqCh chan *LlmRequest
-	expiredCh     chan *runnerRef
-	unloadedCh    chan any
+	pendingReqCount uint64
+	activeReqCount  uint64
+	pendingReqCh    chan *LlmRequest
+	finishedReqCh   chan *LlmRequest
+	expiredCh       chan *runnerRef
+	unloadedCh      chan any
 
 	loaded   map[string]*runnerRef
 	loadedMu sync.Mutex
@@ -64,15 +66,17 @@ var ErrMaxQueue = errors.New("server busy, please try again.  maximum pending re
 func InitScheduler(ctx context.Context) *Scheduler {
 	maxQueue := envconfig.MaxQueue()
 	sched := &Scheduler{
-		pendingReqCh:  make(chan *LlmRequest, maxQueue),
-		finishedReqCh: make(chan *LlmRequest, maxQueue),
-		expiredCh:     make(chan *runnerRef, maxQueue),
-		unloadedCh:    make(chan any, maxQueue),
-		loaded:        make(map[string]*runnerRef),
-		newServerFn:   llm.NewLlamaServer,
-		getGpuFn:      discover.GetGPUInfo,
-		getCpuFn:      discover.GetCPUInfo,
-		reschedDelay:  250 * time.Millisecond,
+		pendingReqCount: 0,
+		activeReqCount:  0,
+		pendingReqCh:    make(chan *LlmRequest, maxQueue),
+		finishedReqCh:   make(chan *LlmRequest, maxQueue),
+		expiredCh:       make(chan *runnerRef, maxQueue),
+		unloadedCh:      make(chan any, maxQueue),
+		loaded:          make(map[string]*runnerRef),
+		newServerFn:     llm.NewLlamaServer,
+		getGpuFn:        discover.GetGPUInfo,
+		getCpuFn:        discover.GetCPUInfo,
+		reschedDelay:    250 * time.Millisecond,
 	}
 	sched.loadFn = sched.load
 	return sched
@@ -95,6 +99,7 @@ func (s *Scheduler) GetRunner(c context.Context, model *Model, opts api.Options,
 
 	select {
 	case s.pendingReqCh <- req:
+		s.pendingReqCount++
 	default:
 		req.errCh <- ErrMaxQueue
 	}
@@ -127,6 +132,7 @@ func (s *Scheduler) processPending(ctx context.Context) {
 			}
 
 			if pending.ctx.Err() != nil {
+				s.pendingReqCount--
 				slog.Debug("pending request cancelled or timed out, skipping scheduling")
 				continue
 			}
@@ -150,6 +156,8 @@ func (s *Scheduler) processPending(ctx context.Context) {
 						runnerToExpire = runner
 					} else {
 						// Runner is usable, return it
+						s.pendingReqCount--
+						s.activeReqCount++
 						pending.useLoadedRunner(runner, s.finishedReqCh)
 						break
 					}
@@ -231,6 +239,8 @@ func (s *Scheduler) processPending(ctx context.Context) {
 							// Only allow partial loads when this is the first model
 							gpus = pickBestPartialFitByLibrary(pending, ggml, gpus, &numParallel)
 						}
+						s.pendingReqCount--
+						s.activeReqCount++
 						s.loadFn(pending, ggml, gpus, numParallel)
 						break
 					}
@@ -249,6 +259,8 @@ func (s *Scheduler) processPending(ctx context.Context) {
 						fitGpus := pickBestFullFitByLibrary(pending, ggml, availGpus, &numParallel)
 						if fitGpus != nil {
 							slog.Debug("new model fits with existing models, loading")
+							s.pendingReqCount--
+							s.activeReqCount++
 							s.loadFn(pending, ggml, fitGpus, numParallel)
 							break
 						}
@@ -320,6 +332,7 @@ func (s *Scheduler) processCompleted(ctx context.Context) {
 			slog.Debug("shutting down scheduler completed loop")
 			return
 		case finished := <-s.finishedReqCh:
+			s.activeReqCount--
 			s.loadedMu.Lock()
 			runner := s.loaded[finished.model.ModelPath]
 			s.loadedMu.Unlock()

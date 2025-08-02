@@ -602,6 +602,34 @@ func ListRunningHandler(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func StatusHandler(cmd *cobra.Command, args []string) error {
+	client, err := api.ClientFromEnvironment()
+	if err != nil {
+		return err
+	}
+
+	status, err := client.Status(cmd.Context())
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Status")
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetAlignment(tablewriter.ALIGN_LEFT)
+	table.SetBorder(false)
+	table.SetNoWhiteSpace(true)
+	table.SetTablePadding("    ")
+
+	table.Append([]string{"", "Busy", fmt.Sprintf("%t", status.Busy)})
+	table.Append([]string{"", "Requests in Queue", fmt.Sprintf("%d", status.QueuedRequests)})
+	table.Append([]string{"", "Requests active", fmt.Sprintf("%d", status.ActiveRequests)})
+
+	table.Render()
+
+	return nil
+}
+
 func DeleteHandler(cmd *cobra.Command, args []string) error {
 	client, err := api.ClientFromEnvironment()
 	if err != nil {
@@ -1516,6 +1544,14 @@ func NewCLI() *cobra.Command {
 		PreRunE: checkServerHeartbeat,
 		RunE:    ListRunningHandler,
 	}
+
+	statusCmd := &cobra.Command{
+		Use:     "status",
+		Short:   "Shows current status of ollama",
+		PreRunE: checkServerHeartbeat,
+		RunE:    StatusHandler,
+	}
+
 	copyCmd := &cobra.Command{
 		Use:     "cp SOURCE DESTINATION",
 		Short:   "Copy a model",
@@ -1557,6 +1593,7 @@ func NewCLI() *cobra.Command {
 		pushCmd,
 		listCmd,
 		psCmd,
+		statusCmd,
 		copyCmd,
 		deleteCmd,
 		serveCmd,
@@ -1597,6 +1634,7 @@ func NewCLI() *cobra.Command {
 		pushCmd,
 		listCmd,
 		psCmd,
+		statusCmd,
 		copyCmd,
 		deleteCmd,
 		runnerCmd,

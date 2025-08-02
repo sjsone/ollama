@@ -456,6 +456,13 @@ type ProcessResponse struct {
 	Models []ProcessModelResponse `json:"models"`
 }
 
+// StatusResponse is the response from [Client.Status].
+type StatusResponse struct {
+	Busy           bool   `json:"busy"`
+	ActiveRequests uint64 `json:"active_requests"`
+	QueuedRequests uint64 `json:"queued_requests"`
+}
+
 // ListModelResponse is a single model description in [ListResponse].
 type ListModelResponse struct {
 	Name       string       `json:"name"`

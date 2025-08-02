@@ -1206,6 +1206,7 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 
 	// Inference
 	r.GET("/api/ps", s.PsHandler)
+	r.GET("/api/status", s.StatusHandler)
 	r.POST("/api/generate", s.GenerateHandler)
 	r.POST("/api/chat", s.ChatHandler)
 	r.POST("/api/embed", s.EmbedHandler)
@@ -1427,6 +1428,14 @@ func (s *Server) PsHandler(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, api.ProcessResponse{Models: models})
+}
+
+func (s *Server) StatusHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, api.StatusResponse{
+		Busy:           s.sched.activeReqCount > 0 || s.sched.pendingReqCount > 0,
+		ActiveRequests: uint64(s.sched.activeReqCount),
+		QueuedRequests: uint64(s.sched.pendingReqCount),
+	})
 }
 
 func (s *Server) ChatHandler(c *gin.Context) {
